@@ -53,6 +53,7 @@ class ContinualLearningAgent:
         with torch.no_grad():
             if self.network_type == 'gru':
                 action_probs, self.hidden_state = self.network(state_tensor, self.hidden_state)
+                action_probs = action_probs.squeeze()  # Remove batch dimension
             else:
                 action_probs = self.network(state_tensor)
         
@@ -75,6 +76,7 @@ class ContinualLearningAgent:
         # Compute current Q-values
         if self.network_type == 'gru':
             current_q, _ = self.network(state_tensor, self.hidden_state)
+            current_q = current_q.squeeze()  # Remove batch dimension
         else:
             current_q = self.network(state_tensor)
         
@@ -82,6 +84,7 @@ class ContinualLearningAgent:
         with torch.no_grad():
             if self.network_type == 'gru':
                 next_q, _ = self.network(next_state_tensor, self.hidden_state)
+                next_q = next_q.squeeze()  # Remove batch dimension
             else:
                 next_q = self.network(next_state_tensor)
             
