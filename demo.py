@@ -163,7 +163,7 @@ class ContinualLearningAgent:
             
             # Print progress
             if episode % 10 == 0:
-                avg_reward = np.mean(self.episode_rewards[-10:]) if len(self.episode_rewards) >= 10 else np.mean(self.episode_rewards)
+                avg_reward = np.mean(self.episode_rewards[-10:])
                 print(f"Episode {episode:3d} | Steps: {steps:3d} | "
                       f"Reward: {reward:6.1f} | Avg(10): {avg_reward:6.1f}")
         

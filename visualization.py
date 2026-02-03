@@ -22,7 +22,15 @@ class ContinualLearningVisualizer:
         self.fig.suptitle('Continual Learning Dynamics', fontsize=14, fontweight='bold')
     
     def update(self, loss, reward, action, prediction):
-        """Update metrics history."""
+        """
+        Update metrics history.
+        
+        Args:
+            loss: Loss value from network training (float)
+            reward: Cumulative reward from environment (float)
+            action: Action taken by the network (int)
+            prediction: Action probabilities from network (numpy array)
+        """
         self.losses.append(loss)
         self.rewards.append(reward)
         self.actions.append(action)

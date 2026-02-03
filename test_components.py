@@ -35,7 +35,8 @@ def test_gru_network():
     hidden = network.init_hidden()
     output, new_hidden = network(test_input, hidden)
     
-    assert output.shape[1] == output_size, f"Expected output dim {output_size}, got {output.shape}"
+    # Output has shape (batch_size, output_size) where batch_size=1
+    assert output.shape[-1] == output_size, f"Expected output dim {output_size}, got {output.shape}"
     assert new_hidden.shape == hidden.shape, f"Hidden state shape mismatch"
     print("✓ GRU network test passed!")
     return True
