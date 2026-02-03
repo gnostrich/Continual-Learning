@@ -119,9 +119,11 @@ class Environment:
         """
         if task_id is not None:
             self.current_task = task_id
-            np.random.seed(task_id)
+            # Use local RNG to avoid side effects
+            rng = np.random.RandomState(task_id)
+            self.task_params = rng.randn(self.observation_dim)
         else:
             self.current_task += 1
+            self.task_params = np.random.randn(self.observation_dim)
             
-        self.task_params = np.random.randn(self.observation_dim)
         self.reset()

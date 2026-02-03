@@ -193,9 +193,7 @@ class ContinualLearningLoop:
         
         for step in range(max_steps):
             # Use internal state as external feedback (recurrent architecture)
-            external_feedback = None
-            if internal_state is not None:
-                external_feedback = internal_state * self.feedback_weight
+            external_feedback = internal_state * self.feedback_weight if internal_state is not None else None
             
             # Training step
             loss = self.train_step(observations, external_feedback=external_feedback)
