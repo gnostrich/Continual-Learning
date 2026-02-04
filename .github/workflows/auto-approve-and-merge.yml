@@ -1,0 +1,29 @@
+name: Auto-Approve and Merge
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+jobs:
+  auto-approve-and-merge:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Check out the code (mandatory for workflows)
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Step 2: Auto-approve PR
+      - name: Auto-approve PR
+        uses: hmarr/auto-approve-action@v3
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Step 3: Automatically merge the PR
+      - name: Merge the PR
+        uses: pascalgn/automerge-action@v0.15.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
