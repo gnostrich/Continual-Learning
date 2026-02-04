@@ -97,13 +97,7 @@ jobs:
             echo "⏳ PR is not yet ready (mergeable: $MERGEABLE, draft: $DRAFT)"
           fi
 
-      - name: Auto-approve if ready
-        if: steps.ready-check.outputs.ready == 'true'
-        uses: hmarr/auto-approve-action@v3
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Enable auto-merge if approved
+      - name: Enable auto-merge if ready
         if: steps.ready-check.outputs.ready == 'true'
         uses: peter-evans/enable-pull-request-automerge@v3
         with:
@@ -121,5 +115,5 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '✅ **Auto-merge enabled** - This PR will be automatically merged once all status checks pass.'
+              body: '✅ **Auto-merge enabled** - This PR will be automatically merged once approved and all status checks pass.'
             });

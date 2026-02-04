@@ -4,9 +4,6 @@ on:
   # Trigger when PR is updated or on schedule to check for new conflicts
   pull_request:
     types: [opened, synchronize, reopened]
-  schedule:
-    # Run daily at midnight UTC to check for conflicts in open PRs
-    - cron: '0 0 * * *'
   workflow_dispatch:
     # Allow manual triggering
 
@@ -57,9 +54,9 @@ jobs:
               echo "✅ No conflicts in PR #${PR_NUMBER}"
             fi
           else
-            # For schedule or manual dispatch, just log and exit
-            echo "Schedule and workflow_dispatch events not fully implemented yet"
-            echo "This would iterate through open PRs to check for conflicts"
+            # For manual dispatch, log that full implementation is pending
+            echo "Manual dispatch event detected"
+            echo "Note: Iterating through all open PRs not yet implemented"
             echo "has_conflicts=false" >> $GITHUB_OUTPUT
           fi
 
@@ -76,8 +73,8 @@ jobs:
           # Checkout the PR branch
           git checkout ${{ github.event.pull_request.head.ref }}
 
-          # Try to merge with auto-resolution for common file types
-          # This only attempts resolution for lock files and generated files
+          # Try to merge with auto-resolution for lock files
+          # Only lock files will be auto-resolved, all other conflicts require manual review
           if git merge origin/${{ github.event.pull_request.base.ref }} --no-edit --no-commit; then
             # Check if there are conflicts in specific file types we can auto-resolve
             CONFLICTED_FILES=$(git diff --name-only --diff-filter=U)

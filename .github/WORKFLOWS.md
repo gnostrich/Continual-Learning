@@ -35,19 +35,17 @@ This repository includes automated workflows for handling pull requests, approva
 
 ### 2. Resolve PR Conflicts (`resolve-conflicts.yml`)
 
-**Triggers:** 
+**Triggers:**
 - PR opened, synchronized, or reopened
-- Daily schedule (midnight UTC)
 - Manual dispatch
 
 **Purpose:** Detect and automatically resolve merge conflicts
 
 **Features:**
 - 🔍 Detects merge conflicts in PRs
-- 🔧 Attempts automatic resolution using merge strategies
+- 🔧 Attempts automatic resolution using selective file checkout
 - 🏷️ Adds/removes "merge-conflict" label
 - 💬 Comments with instructions if manual resolution needed
-- 📅 Runs daily to catch new conflicts
 
 **Auto-Resolution Strategy:**
 - Only auto-resolves specific file types (lock files)
@@ -86,9 +84,8 @@ git push
 1. Bot opens PR
 2. Workflow adds labels and welcome comment
 3. Checks if PR is ready (not draft, mergeable)
-4. Auto-approves if ready
-5. Enables auto-merge
-6. Comments on status
+4. Enables auto-merge (approval handled by auto-approve-and-merge.yml)
+5. Comments on status
 
 ---
 
@@ -117,11 +114,16 @@ merge-method: squash  # Options: merge, squash, rebase
 
 ### Conflict Resolution Strategy
 
-Conflict resolution uses `--strategy-option=theirs` by default. To customize:
+Conflict resolution uses selective file checkout for lock files only. To customize:
 
-Edit `resolve-conflicts.yml` and change the merge strategy:
+Edit `resolve-conflicts.yml` to change which files can be auto-resolved:
 ```bash
-git merge origin/${{ github.event.pull_request.base.ref }} --strategy-option=ours
+case "$file" in
+  package-lock.json|yarn.lock|your-file-pattern)
+    git checkout --theirs "$file"
+    git add "$file"
+    ;;
+esac
 ```
 
 ---
