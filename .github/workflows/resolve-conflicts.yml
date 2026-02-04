@@ -1,0 +1,157 @@
+name: Resolve PR Conflicts
+
+on:
+  # Trigger when PR is updated or on schedule to check for new conflicts
+  pull_request:
+    types: [opened, synchronize, reopened]
+  schedule:
+    # Run daily at midnight UTC to check for conflicts in open PRs
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+    # Allow manual triggering
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  check-and-resolve-conflicts:
+    runs-on: ubuntu-latest
+    # Only run for bot PRs or copilot branches
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      github.event.pull_request.user.login == 'dependabot[bot]' ||
+      github.event.pull_request.user.login == 'renovate[bot]' ||
+      github.event.pull_request.user.login == 'github-actions[bot]' ||
+      contains(github.event.pull_request.head.ref, 'copilot/')
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for conflicts
+        id: conflict-check
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            # For PR events, check the specific PR
+            PR_NUMBER=${{ github.event.pull_request.number }}
+            echo "Checking PR #${PR_NUMBER} for conflicts"
+
+            git fetch origin ${{ github.event.pull_request.base.ref }}
+            git fetch origin ${{ github.event.pull_request.head.ref }}
+
+            # Try to merge and check for conflicts
+            BASE_SHA=$(git rev-parse origin/${{ github.event.pull_request.base.ref }})
+            HEAD_SHA=$(git rev-parse origin/${{ github.event.pull_request.head.ref }})
+            MERGE_BASE=$(git merge-base $BASE_SHA $HEAD_SHA)
+
+            if git merge-tree $MERGE_BASE $HEAD_SHA $BASE_SHA | grep -q '<<<<<<<'; then
+              echo "has_conflicts=true" >> $GITHUB_OUTPUT
+              echo "pr_number=${PR_NUMBER}" >> $GITHUB_OUTPUT
+              echo "⚠️ Conflicts detected in PR #${PR_NUMBER}"
+            else
+              echo "has_conflicts=false" >> $GITHUB_OUTPUT
+              echo "✅ No conflicts in PR #${PR_NUMBER}"
+            fi
+          fi
+
+      - name: Attempt auto-resolution
+        if: steps.conflict-check.outputs.has_conflicts == 'true'
+        id: auto-resolve
+        run: |
+          echo "Attempting to auto-resolve conflicts..."
+
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Checkout the PR branch
+          git checkout ${{ github.event.pull_request.head.ref }}
+
+          # Try to merge with theirs strategy for auto-generated files
+          if git merge origin/${{ github.event.pull_request.base.ref }} --strategy-option=theirs --no-edit; then
+            echo "resolved=true" >> $GITHUB_OUTPUT
+            echo "✅ Conflicts auto-resolved"
+
+            # Push the resolution
+            git push origin ${{ github.event.pull_request.head.ref }}
+          else
+            echo "resolved=false" >> $GITHUB_OUTPUT
+            echo "❌ Could not auto-resolve conflicts"
+            git merge --abort
+          fi
+
+      - name: Comment on successful resolution
+        if: |
+          steps.conflict-check.outputs.has_conflicts == 'true' &&
+          steps.auto-resolve.outputs.resolved == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '✅ Merge conflicts have been automatically resolved. The PR is now ready for review and merging.'
+            })
+
+      - name: Comment on failed resolution
+        if: |
+          steps.conflict-check.outputs.has_conflicts == 'true' &&
+          steps.auto-resolve.outputs.resolved == 'false'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `⚠️ This PR has merge conflicts that require manual resolution.
+
+              **To resolve:**
+              1. Checkout the branch: \`git checkout ${{ github.event.pull_request.head.ref }}\`
+              2. Merge the base branch: \`git merge origin/${{ github.event.pull_request.base.ref }}\`
+              3. Resolve conflicts manually
+              4. Commit and push: \`git commit -am "Resolve merge conflicts" && git push\`
+
+              Once resolved, the auto-approve and merge workflow will continue.`
+            })
+
+      - name: Add conflict label
+        if: steps.conflict-check.outputs.has_conflicts == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            try {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                labels: ['merge-conflict']
+              })
+            } catch (error) {
+              console.log('Could not add label (might not exist):', error.message)
+            }
+
+      - name: Remove conflict label if resolved
+        if: steps.conflict-check.outputs.has_conflicts == 'false'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            try {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                name: 'merge-conflict'
+              })
+            } catch (error) {
+              console.log('Label does not exist or already removed:', error.message)
+            }

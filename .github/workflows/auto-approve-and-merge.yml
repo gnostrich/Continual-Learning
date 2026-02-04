@@ -7,23 +7,79 @@ on:
       - synchronize
       - reopened
 
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
-  auto-approve-and-merge:
+  auto-approve:
     runs-on: ubuntu-latest
+    # Only run for PRs from bots or specific trusted contributors
+    if: |
+      github.event.pull_request.user.login == 'dependabot[bot]' ||
+      github.event.pull_request.user.login == 'renovate[bot]' ||
+      github.event.pull_request.user.login == 'github-actions[bot]' ||
+      contains(github.event.pull_request.head.ref, 'copilot/')
 
     steps:
-      # Step 1: Check out the code (mandatory for workflows)
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      # Step 2: Auto-approve PR
+      - name: Check for merge conflicts
+        id: check-conflicts
+        run: |
+          git fetch origin ${{ github.event.pull_request.base.ref }}
+          if git merge-tree $(git merge-base HEAD origin/${{ github.event.pull_request.base.ref }}) HEAD origin/${{ github.event.pull_request.base.ref }} | grep -q '<<<<<'; then
+            echo "has_conflicts=true" >> $GITHUB_OUTPUT
+            echo "⚠️ Merge conflicts detected"
+          else
+            echo "has_conflicts=false" >> $GITHUB_OUTPUT
+            echo "✅ No merge conflicts"
+          fi
+
       - name: Auto-approve PR
+        if: steps.check-conflicts.outputs.has_conflicts == 'false'
         uses: hmarr/auto-approve-action@v3
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Step 3: Automatically merge the PR
-      - name: Merge the PR
-        uses: pascalgn/automerge-action@v0.15.2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Comment on conflicts
+        if: steps.check-conflicts.outputs.has_conflicts == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '⚠️ This PR has merge conflicts that need to be resolved before it can be auto-approved and merged.'
+            })
+
+  auto-merge:
+    runs-on: ubuntu-latest
+    needs: auto-approve
+    # Only merge if auto-approve succeeded
+    if: |
+      (github.event.pull_request.user.login == 'dependabot[bot]' ||
+       github.event.pull_request.user.login == 'renovate[bot]' ||
+       github.event.pull_request.user.login == 'github-actions[bot]' ||
+       contains(github.event.pull_request.head.ref, 'copilot/')) &&
+      github.event.pull_request.mergeable_state == 'clean'
+
+    steps:
+      - name: Wait for CI checks
+        uses: lewagon/wait-on-check-action@v1.3.3
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 10
+          running-workflow-name: 'auto-merge'
+          allowed-conclusions: success,skipped,neutral
+
+      - name: Enable auto-merge
+        uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          pull-request-number: ${{ github.event.pull_request.number }}
+          merge-method: squash

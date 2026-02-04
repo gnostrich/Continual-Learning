@@ -152,6 +152,16 @@ def custom_train_step(self, observations, target):
     # ... rest of training
 ```
 
+## Automated Workflows
+
+This repository includes automated GitHub Actions workflows for streamlined PR management:
+
+- **Auto-Approve & Merge**: Automatically approves and merges PRs from bots (dependabot, renovate, github-actions) and copilot branches
+- **Conflict Resolution**: Detects and attempts to automatically resolve merge conflicts, with fallback to manual instructions
+- **Bot PR Handler**: Specialized handling for bot-submitted PRs with auto-labeling and status updates
+
+For detailed documentation, see [.github/WORKFLOWS.md](.github/WORKFLOWS.md).
+
 ## License
 
 See LICENSE file for details.

@@ -1,0 +1,125 @@
+name: Bot PR Handler
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  handle-bot-pr:
+    runs-on: ubuntu-latest
+    # Only run for bot PRs
+    if: |
+      github.event.pull_request.user.login == 'dependabot[bot]' ||
+      github.event.pull_request.user.login == 'renovate[bot]' ||
+      github.event.pull_request.user.login == 'github-actions[bot]'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Fetch PR details
+        id: pr-details
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+
+            core.setOutput('mergeable', pr.data.mergeable);
+            core.setOutput('mergeable_state', pr.data.mergeable_state);
+            core.setOutput('draft', pr.data.draft);
+
+            return pr.data;
+
+      - name: Label bot PR
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const labels = ['bot-pr', 'auto-merge'];
+
+            if (context.payload.pull_request.user.login.includes('dependabot')) {
+              labels.push('dependencies');
+            }
+
+            try {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                labels: labels
+              });
+            } catch (error) {
+              console.log('Could not add labels:', error.message);
+            }
+
+      - name: Add welcome comment
+        if: github.event.action == 'opened'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const botName = context.payload.pull_request.user.login;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `🤖 **Automated PR from ${botName}**
+
+              This PR will be automatically processed:
+              - ✅ Conflicts will be checked and resolved if possible
+              - ✅ PR will be auto-approved if all checks pass
+              - ✅ PR will be auto-merged when ready
+
+              **Status:** Processing...`
+            });
+
+      - name: Check if PR is ready for auto-merge
+        id: ready-check
+        run: |
+          MERGEABLE="${{ steps.pr-details.outputs.mergeable }}"
+          DRAFT="${{ steps.pr-details.outputs.draft }}"
+
+          if [ "$MERGEABLE" == "true" ] && [ "$DRAFT" == "false" ]; then
+            echo "ready=true" >> $GITHUB_OUTPUT
+            echo "✅ PR is ready for auto-merge"
+          else
+            echo "ready=false" >> $GITHUB_OUTPUT
+            echo "⏳ PR is not yet ready (mergeable: $MERGEABLE, draft: $DRAFT)"
+          fi
+
+      - name: Auto-approve if ready
+        if: steps.ready-check.outputs.ready == 'true'
+        uses: hmarr/auto-approve-action@v3
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable auto-merge if approved
+        if: steps.ready-check.outputs.ready == 'true'
+        uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          pull-request-number: ${{ github.event.pull_request.number }}
+          merge-method: squash
+
+      - name: Update status comment
+        if: steps.ready-check.outputs.ready == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '✅ **Auto-merge enabled** - This PR will be automatically merged once all status checks pass.'
+            });
