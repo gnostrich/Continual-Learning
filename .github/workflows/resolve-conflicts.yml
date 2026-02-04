@@ -48,7 +48,7 @@ jobs:
             HEAD_SHA=$(git rev-parse origin/${{ github.event.pull_request.head.ref }})
             MERGE_BASE=$(git merge-base $BASE_SHA $HEAD_SHA)
 
-            if git merge-tree $MERGE_BASE $HEAD_SHA $BASE_SHA | grep -q '<<<<<<<'; then
+            if git merge-tree $MERGE_BASE $HEAD_SHA $BASE_SHA | grep -q '^<<<<<<<'; then
               echo "has_conflicts=true" >> $GITHUB_OUTPUT
               echo "pr_number=${PR_NUMBER}" >> $GITHUB_OUTPUT
               echo "⚠️ Conflicts detected in PR #${PR_NUMBER}"
@@ -56,6 +56,11 @@ jobs:
               echo "has_conflicts=false" >> $GITHUB_OUTPUT
               echo "✅ No conflicts in PR #${PR_NUMBER}"
             fi
+          else
+            # For schedule or manual dispatch, just log and exit
+            echo "Schedule and workflow_dispatch events not fully implemented yet"
+            echo "This would iterate through open PRs to check for conflicts"
+            echo "has_conflicts=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Attempt auto-resolution
@@ -71,13 +76,37 @@ jobs:
           # Checkout the PR branch
           git checkout ${{ github.event.pull_request.head.ref }}
 
-          # Try to merge with theirs strategy for auto-generated files
-          if git merge origin/${{ github.event.pull_request.base.ref }} --strategy-option=theirs --no-edit; then
-            echo "resolved=true" >> $GITHUB_OUTPUT
-            echo "✅ Conflicts auto-resolved"
+          # Try to merge with auto-resolution for common file types
+          # This only attempts resolution for lock files and generated files
+          if git merge origin/${{ github.event.pull_request.base.ref }} --no-edit --no-commit; then
+            # Check if there are conflicts in specific file types we can auto-resolve
+            CONFLICTED_FILES=$(git diff --name-only --diff-filter=U)
+            CAN_AUTO_RESOLVE=true
 
-            # Push the resolution
-            git push origin ${{ github.event.pull_request.head.ref }}
+            for file in $CONFLICTED_FILES; do
+              case "$file" in
+                package-lock.json|yarn.lock|Gemfile.lock|poetry.lock|Pipfile.lock)
+                  echo "Auto-resolving lock file: $file"
+                  git checkout --theirs "$file"
+                  git add "$file"
+                  ;;
+                *)
+                  echo "Cannot auto-resolve: $file (requires manual review)"
+                  CAN_AUTO_RESOLVE=false
+                  ;;
+              esac
+            done
+
+            if [ "$CAN_AUTO_RESOLVE" = true ]; then
+              git commit --no-edit
+              git push origin ${{ github.event.pull_request.head.ref }}
+              echo "resolved=true" >> $GITHUB_OUTPUT
+              echo "✅ Conflicts auto-resolved"
+            else
+              echo "resolved=false" >> $GITHUB_OUTPUT
+              echo "❌ Some conflicts require manual resolution"
+              git merge --abort
+            fi
           else
             echo "resolved=false" >> $GITHUB_OUTPUT
             echo "❌ Could not auto-resolve conflicts"

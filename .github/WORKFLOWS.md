@@ -50,9 +50,11 @@ This repository includes automated workflows for handling pull requests, approva
 - 📅 Runs daily to catch new conflicts
 
 **Auto-Resolution Strategy:**
-- Uses `--strategy-option=theirs` for auto-generated files
-- Automatically pushes resolved conflicts
-- Falls back to manual instructions if auto-resolution fails
+- Only auto-resolves specific file types (lock files)
+- For lock files: package-lock.json, yarn.lock, Gemfile.lock, poetry.lock, Pipfile.lock
+- Uses `--theirs` strategy only for these safe file types
+- Other files require manual resolution
+- Falls back to manual instructions if auto-resolution not possible
 
 **When Manual Resolution is Needed:**
 The workflow provides step-by-step instructions in a PR comment:
@@ -126,9 +128,9 @@ git merge origin/${{ github.event.pull_request.base.ref }} --strategy-option=our
 
 ## Security Considerations
 
-1. **`pull_request_target` vs `pull_request`:**
-   - `bot-pr-handler.yml` uses `pull_request_target` for bot PRs (safer)
-   - Other workflows use `pull_request` with filtered conditions
+1. **Event Types:**
+   - All workflows use `pull_request` event type with filtered conditions
+   - This ensures code runs in the context of the PR (safer for bot PRs)
 
 2. **Permissions:**
    - Workflows use minimal required permissions

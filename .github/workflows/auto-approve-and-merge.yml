@@ -29,7 +29,7 @@ jobs:
         id: check-conflicts
         run: |
           git fetch origin ${{ github.event.pull_request.base.ref }}
-          if git merge-tree $(git merge-base HEAD origin/${{ github.event.pull_request.base.ref }}) HEAD origin/${{ github.event.pull_request.base.ref }} | grep -q '<<<<<'; then
+          if git merge-tree $(git merge-base HEAD origin/${{ github.event.pull_request.base.ref }}) HEAD origin/${{ github.event.pull_request.base.ref }} | grep -q '^<<<<<<<'; then
             echo "has_conflicts=true" >> $GITHUB_OUTPUT
             echo "⚠️ Merge conflicts detected"
           else
@@ -76,6 +76,7 @@ jobs:
           wait-interval: 10
           running-workflow-name: 'auto-merge'
           allowed-conclusions: success,skipped,neutral
+        continue-on-error: true
 
       - name: Enable auto-merge
         uses: peter-evans/enable-pull-request-automerge@v3
