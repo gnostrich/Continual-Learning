@@ -17,7 +17,6 @@ jobs:
     # Only run for bot PRs or copilot branches
     if: |
       github.event_name == 'workflow_dispatch' ||
-      github.event_name == 'schedule' ||
       github.event.pull_request.user.login == 'dependabot[bot]' ||
       github.event.pull_request.user.login == 'renovate[bot]' ||
       github.event.pull_request.user.login == 'github-actions[bot]' ||
@@ -75,7 +74,7 @@ jobs:
 
           # Try to merge with auto-resolution for lock files
           # Only lock files will be auto-resolved, all other conflicts require manual review
-          if git merge origin/${{ github.event.pull_request.base.ref }} --no-edit --no-commit; then
+          if git merge origin/${{ github.event.pull_request.base.ref }} --no-edit; then
             # Check if there are conflicts in specific file types we can auto-resolve
             CONFLICTED_FILES=$(git diff --name-only --diff-filter=U)
             CAN_AUTO_RESOLVE=true
@@ -95,14 +94,14 @@ jobs:
             done
 
             if [ "$CAN_AUTO_RESOLVE" = true ]; then
-              git commit --no-edit
+              git commit --amend --no-edit
               git push origin ${{ github.event.pull_request.head.ref }}
               echo "resolved=true" >> $GITHUB_OUTPUT
               echo "✅ Conflicts auto-resolved"
             else
               echo "resolved=false" >> $GITHUB_OUTPUT
               echo "❌ Some conflicts require manual resolution"
-              git merge --abort
+              git reset --hard HEAD^
             fi
           else
             echo "resolved=false" >> $GITHUB_OUTPUT
