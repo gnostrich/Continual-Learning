@@ -17,13 +17,13 @@ The system has two coupled models:
 - **CrossModalModel**: Processes multi-modal observations and outputs an action
 - **EnvironmentPredictor**: Predicts the environment's next multi-modal response given the action and internal state
 
-Let a_t be the action, ô_{t+1} the predicted observation, and o_{t+1} the true observation.
+Let $a_t$ be the action, $\hat{o}_{t+1}$ the predicted observation, and $o_{t+1}$ the true observation.
 
 **Prediction divergence loss**:  
-L_div = D(ô_{t+1}, o_{t+1})
+$\mathcal{L}_\text{div} = D$($\hat{o}_{t+1}$, $o_{t+1}$)
 
 Total loss is a weighted sum:  
-L = L_div + α·L_action + β·L_EWC
+$\mathcal{L} = \mathcal{L}_\text{div} + \alpha \cdot \mathcal{L}_\text{action} + \beta \cdot \mathcal{L}_\text{EWC}$
 
 ## 3. Continual Learning Loop
 
