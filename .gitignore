@@ -22,8 +22,8 @@ wheels/
 
 # Virtual environments
 venv/
-env/
 ENV/
+env/
 
 # IDE
 .vscode/
@@ -32,6 +32,20 @@ ENV/
 *.swo
 *~
 
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Generated files
+*.png
+*.jpg
+*.gif
+*.pdf
+
 # OS
 .DS_Store
 Thumbs.db
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
