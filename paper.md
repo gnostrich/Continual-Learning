@@ -20,7 +20,7 @@ The system has two coupled models:
 Let $a_t$ be the action, $\hat{o}_{t+1}$ the predicted observation, and $o_{t+1}$ the true observation.
 
 **Prediction divergence loss**:  
-$\mathcal{L}_\text{div} = D$($\hat{o}_{t+1}$, $o_{t+1}$)
+$\mathcal{L}_\text{div} = D(\hat{o}_{t+1}, o_{t+1})$
 
 Total loss is a weighted sum:  
 $\mathcal{L} = \mathcal{L}_\text{div} + \alpha \cdot \mathcal{L}_\text{action} + \beta \cdot \mathcal{L}_\text{EWC}$
