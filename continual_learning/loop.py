@@ -13,27 +13,35 @@ class ContinualLearningLoop:
     
     Features:
     - Recurrent feedback: Model outputs feed back as environment inputs
+    - Self-supervised learning: Predictor learns environment dynamics
+    - Divergence minimization: Minimizes difference between predicted and actual responses
     - Dynamic adaptation: Continuously learns from new data streams
     - Knowledge preservation: Uses EWC (Elastic Weight Consolidation) to prevent forgetting
-    - Divergence monitoring: Tracks model parameter changes
     """
     
     def __init__(
         self,
         model,
+        predictor,
         environment,
         learning_rate: float = 1e-3,
         ewc_lambda: float = 0.5,
         feedback_weight: float = 0.3,
+        divergence_weight: float = 1.0,
+        action_l2_weight: float = 1e-3,
     ):
         self.model = model
+        self.predictor = predictor
         self.environment = environment
         self.learning_rate = learning_rate
         self.ewc_lambda = ewc_lambda
         self.feedback_weight = feedback_weight
+        self.divergence_weight = divergence_weight
+        self.action_l2_weight = action_l2_weight
         
-        # Optimizer
+        # Optimizers for both models
         self.optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
+        self.predictor_optimizer = optim.Adam(self.predictor.parameters(), lr=learning_rate)
         
         # For knowledge preservation (EWC)
         self.fisher_information = {}
@@ -132,45 +140,65 @@ class ContinualLearningLoop:
                 
         return total_divergence / max(num_params, 1)
         
-    def train_step(self, observations, target=None, external_feedback=None):
+    def train_step(self, action, internal_state, actual_response=None):
         """
-        Single training step with continual learning.
-        
+        Single training step with predictor-based self-supervised learning.
+
+        Minimizes divergence between predicted and actual environment responses.
+
         Args:
-            observations: List of observation tensors (multi-modal)
-            target: Optional target for supervised learning
-            external_feedback: Optional external feedback signal
-            
+            action: Action tensor from model [batch, action_dim]
+            internal_state: Internal state from model [batch, hidden_dim]
+            actual_response: Actual environment response from current step
+
         Returns:
             loss: Total loss value
         """
         self.model.train()
+        self.predictor.train()
         self.optimizer.zero_grad()
-        
-        # Forward pass
-        output, internal_state = self.model(observations, external_feedback)
-        
-        # Task loss (can be supervised or unsupervised)
-        if target is not None:
-            task_loss = nn.functional.mse_loss(output, target)
+        self.predictor_optimizer.zero_grad()
+
+        # Predict environment response from the same action used to step the env
+        predicted_responses, _ = self.predictor(action, internal_state)
+
+        # Compute divergence loss
+        if actual_response is not None:
+            # actual_response is list of tensors (one per modality)
+            divergence_loss = torch.tensor(0.0, device=action.device)
+            for pred, actual in zip(predicted_responses, actual_response):
+                divergence_loss += nn.functional.mse_loss(pred, actual)
         else:
-            # Unsupervised: minimize output variance (stability)
-            task_loss = output.var()
-        
-        # EWC regularization for knowledge preservation
+            # Self-supervised: use action variance as stability loss
+            divergence_loss = action.var()
+
+        # Regularization terms
         ewc_reg = self.ewc_loss()
-        
+        action_reg = action.pow(2).mean()
+
         # Total loss
-        total_loss = task_loss + self.ewc_lambda * ewc_reg
-        
+        total_loss = (
+            self.divergence_weight * divergence_loss
+            + self.action_l2_weight * action_reg
+            + self.ewc_lambda * ewc_reg
+        )
+
         # Backward pass
         total_loss.backward()
-        
+
         # Gradient clipping for stability
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-        
+        torch.nn.utils.clip_grad_norm_(self.predictor.parameters(), max_norm=1.0)
+
         self.optimizer.step()
-        
+        self.predictor_optimizer.step()
+
+        # Detach recurrent states to prevent backprop through time across steps
+        if self.model.hidden_state is not None:
+            self.model.hidden_state = self.model.hidden_state.detach()
+        if self.predictor.hidden_state is not None:
+            self.predictor.hidden_state = self.predictor.hidden_state.detach()
+
         return total_loss.item()
         
     def run_episode(self, max_steps: int = 100, verbose: bool = False):
@@ -186,27 +214,42 @@ class ContinualLearningLoop:
         """
         observations = self.environment.reset()
         self.model.reset_state()
+        self.predictor.reset_state()
         
         episode_losses = []
         episode_rewards = []
         internal_state = None
         
         for step in range(max_steps):
+            # Detach hidden states to avoid backprop across steps
+            if self.model.hidden_state is not None:
+                self.model.hidden_state = self.model.hidden_state.detach()
+            if self.predictor.hidden_state is not None:
+                self.predictor.hidden_state = self.predictor.hidden_state.detach()
+
             # Use internal state as external feedback (recurrent architecture)
-            external_feedback = internal_state * self.feedback_weight if internal_state is not None else None
-            
-            # Training step
-            loss = self.train_step(observations, external_feedback=external_feedback)
-            episode_losses.append(loss)
-            
-            # Get action from model
-            with torch.no_grad():
-                action, internal_state = self.model(observations, external_feedback)
-            
-            # Environment step
-            observations, reward, done, info = self.environment.step(action)
+            external_feedback = (
+                internal_state * self.feedback_weight if internal_state is not None else None
+            )
+
+            # Forward pass with gradients for learning
+            action, internal_state = self.model(observations, external_feedback)
+            internal_state = internal_state.detach()
+
+            # Environment step (actual response) uses detached action
+            next_observations, reward, done, info = self.environment.step(action.detach())
             episode_rewards.append(reward)
-            
+
+            # Training step using divergence between predicted and actual response
+            loss = self.train_step(
+                action,
+                internal_state,
+                actual_response=next_observations,
+            )
+            episode_losses.append(loss)
+
+            observations = next_observations
+
             if done:
                 break
                 

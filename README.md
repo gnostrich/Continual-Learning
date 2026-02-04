@@ -1,28 +1,50 @@
 # Continual Learning Loop
 
-A minimal continual learning system with a recurrent feedback architecture. The system integrates:
+A self-supervised continual learning system with predictor-based divergence minimization. The system learns environment dynamics without external supervision by using two models:
 
-- **A single cross-modal model**: Processes multi-modal inputs with interaction between internal and external signals
-- **Environmental interaction**: Outputs act on a simulated environment and feed back as inputs (external/internal)
-- **Continual learning**: Dynamically adapts to new input streams, minimizing model divergence while preserving prior knowledge
+- **Model 1 (Action Model)**: Cross-modal model that processes observations and outputs actions
+- **Model 2 (Environment Predictor)**: Learns to predict what the environment will respond with
+- **Self-supervised learning**: Trains by minimizing divergence between predicted and actual environment responses
+- **Continual adaptation**: Learns purely from prediction errors—no external labels or rewards required
+
+## Motivation
+
+Traditional continual learning requires external supervision (labels/rewards). This system implements **truly self-supervised continual learning**:
+
+1. **Model 1** outputs an action based on current observations
+2. **Model 2** predicts what the environment will respond with
+3. Environment provides actual response
+4. **Both models learn** by minimizing divergence between predicted vs actual
+
+The prediction error becomes the learning signal—no external training data needed. The system learns environment dynamics purely from its own prediction mistakes.
 
 ## Architecture
 
-### Cross-Modal Model (`continual_learning/model.py`)
+### Model 1: Cross-Modal Action Model (`continual_learning/model.py`)
 - Processes multiple input modalities simultaneously
 - Uses cross-attention for modality interaction
 - Maintains internal recurrent state (GRU-based memory)
 - Integrates external feedback from environment
-- Outputs actions that affect the environment
+- **Outputs actions** that affect the environment
+- 235,424 parameters
+
+### Model 2: Environment Predictor (`continual_learning/model.py`)
+- **Key innovation for self-supervised learning**
+- Takes action + internal state as input
+- **Predicts environment's multi-modal response**
+- Trained jointly with action model via divergence loss
+- Enables learning without external labels
+- 185,728 parameters
 
 ### Environment (`continual_learning/environment.py`)
 - Simulates a dynamic environment
-- Receives actions from the model
+- Receives actions from Model 1
 - Returns multi-modal observations
 - Supports task switching for continual learning scenarios
 
 ### Continual Learning Loop (`continual_learning/loop.py`)
-- Connects model and environment in a feedback loop
+- Connects both models and environment in feedback loop
+- **Trains via prediction divergence minimization**
 - Implements Elastic Weight Consolidation (EWC) for knowledge preservation
 - Monitors parameter divergence to prevent catastrophic forgetting
 - Enables dynamic adaptation to new tasks
@@ -38,9 +60,9 @@ pip install -r requirements.txt
 ### Basic Example
 
 ```python
-from continual_learning import CrossModalModel, Environment, ContinualLearningLoop
+from continual_learning import CrossModalModel, EnvironmentPredictor, Environment, ContinualLearningLoop
 
-# Initialize components
+# Initialize Model 1 (Action Model)
 model = CrossModalModel(
     input_dim=64,
     hidden_dim=128,
@@ -48,19 +70,31 @@ model = CrossModalModel(
     num_modalities=2,
 )
 
+# Initialize Model 2 (Environment Predictor)
+predictor = EnvironmentPredictor(
+    action_dim=32,
+    hidden_dim=128,
+    output_dim=64,
+    num_modalities=2,
+)
+
+# Initialize Environment
 environment = Environment(
     observation_dim=64,
     action_dim=32,
     num_modalities=2,
 )
 
-# Create learning loop
+# Create learning loop (trains both models via divergence)
 learning_loop = ContinualLearningLoop(
     model=model,
+    predictor=predictor,
     environment=environment,
-    learning_rate=1e-3,
+    learning_rate=3e-4,
     ewc_lambda=0.5,  # Knowledge preservation strength
     feedback_weight=0.3,  # Recurrent feedback weight
+    divergence_weight=0.5,  # Prediction divergence loss weight
+    action_l2_weight=1e-3,  # Action regularization
 )
 
 # Run continual learning across multiple tasks
@@ -90,8 +124,10 @@ The model processes multiple modalities (e.g., visual, auditory) simultaneously:
 - External feedback from environment influences processing
 - Enables temporal dependencies and memory
 
-### 3. Continual Learning
-- **Dynamic Adaptation**: Learns from continuous data streams
+### 3. Self-Supervised Continual Learning
+- **No external labels required**: Learns purely from prediction errors
+- **Prediction divergence as loss**: Minimizes difference between predicted and actual environment responses
+- **Dynamic Adaptation**: Learns environment dynamics from continuous interaction
 - **Knowledge Preservation**: Uses EWC to retain important knowledge from previous tasks
 - **Divergence Monitoring**: Tracks how much model parameters change
 - **Task Switching**: Seamlessly transitions between different tasks
@@ -105,21 +141,36 @@ The model processes multiple modalities (e.g., visual, auditory) simultaneously:
 
 ### Information Flow
 ```
-Multi-modal Observations → Encoders → Cross-Attention → 
-  ↓
-Recurrent Layer (with internal state) → Output → Actions
-  ↑                                        ↓
-External Feedback ←――――――――――――― Environment
+                    ┌──────────────────────┐
+                    │   Model 1 (Action)   │
+Observations ──────>│  Cross-Modal Model   │────> Action
+                    └──────────────────────┘       │
+                              │                     │
+                         Internal State            │
+                              │                     ▼
+                              ▼              ┌─────────────┐
+                    ┌──────────────────────┐ │ Environment │
+                    │ Model 2 (Predictor)  │ └─────────────┘
+                    │ Environment Dynamics │        │
+                    └──────────────────────┘        │
+                              │                     │
+                      Predicted Response      Actual Response
+                              │                     │
+                              └─────> Compare <─────┘
+                                   (Divergence Loss)
 ```
 
 ### Learning Process
-1. Model receives multi-modal observations from environment
+1. **Model 1** receives multi-modal observations from environment
 2. Processes through modality encoders and cross-attention
 3. Recurrent layer maintains internal state
-4. Generates actions that affect environment
-5. Environment returns new observations and feedback
-6. EWC regularization preserves important knowledge
-7. Model adapts while minimizing divergence
+4. **Generates action** that affects environment
+5. **Model 2** predicts what environment will respond with (using action + state)
+6. **Environment** returns actual response
+7. **Compute divergence** between predicted and actual response
+8. **Both models update** to minimize prediction error
+9. EWC regularization preserves important knowledge
+10. System learns environment dynamics through self-supervision
 
 ## Extending the System
 
@@ -142,15 +193,19 @@ class CustomEnvironment(Environment):
         return observations, reward, done, info
 ```
 
-### Different Learning Objectives
-Modify the `train_step` method to use custom loss functions:
+### Validation
+Run the validation suite to verify the system learns correctly:
 
-```python
-def custom_train_step(self, observations, target):
-    output, internal_state = self.model(observations)
-    loss = custom_loss_function(output, target)
-    # ... rest of training
+```bash
+python validate_predictor.py
 ```
+
+This tests:
+- Prediction accuracy improvement over training
+- Learning curve analysis
+- Environment dynamics learning
+
+Expected result: Prediction error should decrease significantly (>99% improvement on deterministic environments).
 
 ## License
 

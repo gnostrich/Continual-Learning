@@ -116,3 +116,95 @@ class CrossModalModel(nn.Module):
         internal_state = recurrent_out.squeeze(1)
         
         return output, internal_state
+
+
+class EnvironmentPredictor(nn.Module):
+    """
+    Predictor model that learns to forecast environment responses.
+    
+    Given an action and current internal state, predicts what the environment
+    will return (observation/feedback). Used for self-supervised continual learning
+    via divergence minimization between predicted and actual responses.
+    """
+    
+    def __init__(
+        self,
+        action_dim: int = 32,
+        hidden_dim: int = 128,
+        output_dim: int = 64,
+        num_modalities: int = 2,
+    ):
+        super().__init__()
+        
+        self.action_dim = action_dim
+        self.hidden_dim = hidden_dim
+        self.output_dim = output_dim
+        self.num_modalities = num_modalities
+        
+        # Process action and internal state
+        self.state_processor = nn.Sequential(
+            nn.Linear(action_dim + hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim)
+        )
+        
+        # Recurrent processing of dynamics
+        self.recurrent = nn.GRU(
+            input_size=hidden_dim,
+            hidden_size=hidden_dim,
+            batch_first=True
+        )
+        
+        # Multi-modal output decoders (predict each modality separately)
+        self.modality_decoders = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Linear(hidden_dim, output_dim)
+            )
+            for _ in range(num_modalities)
+        ])
+        
+        self.hidden_state = None
+    
+    def reset_state(self):
+        """Reset internal hidden state."""
+        self.hidden_state = None
+    
+    def forward(self, action, internal_state):
+        """
+        Predict environment response given action and current state.
+        
+        Args:
+            action: Action tensor [batch, action_dim]
+            internal_state: Internal state tensor [batch, hidden_dim]
+            
+        Returns:
+            predictions: List of predicted observations (one per modality)
+            pred_state: Predicted internal state for next step
+        """
+        batch_size = action.size(0)
+        
+        # Combine action and internal state
+        combined = torch.cat([action, internal_state], dim=1)
+        processed = self.state_processor(combined)
+        
+        # Process through recurrent layer
+        if self.hidden_state is None:
+            self.hidden_state = torch.zeros(1, batch_size, self.hidden_dim)
+            if action.is_cuda:
+                self.hidden_state = self.hidden_state.cuda()
+        
+        recurrent_out, self.hidden_state = self.recurrent(
+            processed.unsqueeze(1), self.hidden_state
+        )
+        
+        pred_state = recurrent_out.squeeze(1)
+        
+        # Decode predictions for each modality
+        predictions = []
+        for decoder in self.modality_decoders:
+            pred = decoder(pred_state)
+            predictions.append(pred)
+        
+        return predictions, pred_state
