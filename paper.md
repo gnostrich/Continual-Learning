@@ -1,49 +1,57 @@
-# Continual Learning Loop: Self-Supervised Adaptation via Prediction Divergence
+# Continual Learning Loop v2: Self-Supervised Adaptation with Asynchronous Observations
 
 **Anonymous Authors**
 
 ## Abstract
 
-We present a self-supervised continual learning system that learns environment dynamics without external labels or rewards. The system couples an action model (CrossModalModel) with an environment predictor (EnvironmentPredictor). The predictor forecasts the environment's response to the model's action; divergence between predicted and actual responses provides the training signal. This feedback loop enables continual adaptation while Elastic Weight Consolidation (EWC) mitigates catastrophic forgetting. A demo run produces per-task averages for loss, reward, and parameter divergence.
+We present a self-supervised continual learning system that explicitly models asynchrony between actions and observations. The system couples a controller with an environment predictor. The predictor forecasts the environment response to the controller action, and divergence between predicted and actual responses provides the shared learning signal. A delayed-observation wrapper exposes the controller to stale signals while blending in predicted estimates, making the loop robust to latency and partial observability. Elastic Weight Consolidation (EWC) is retained to mitigate catastrophic forgetting across tasks.
 
 ## 1. Introduction
 
-Continual learning aims to adapt to new tasks without forgetting old ones. Most methods rely on labeled supervision or explicit reward signals. We propose a self-supervised alternative: learn environment dynamics by minimizing the mismatch between predicted and observed responses. This avoids external labels and uses prediction error as the learning signal.
+Continual learning aims to adapt to new tasks without forgetting old ones. Many methods rely on labeled supervision or explicit rewards. We propose a self-supervised alternative that learns environment dynamics through prediction error while acknowledging asynchronous feedback: the system can act even when the latest observation has not arrived. This matches settings where outcomes are delayed or noisy.
 
 ## 2. Method
 
 The system has two coupled models:
 
-- **CrossModalModel**: Processes multi-modal observations and outputs an action
-- **EnvironmentPredictor**: Predicts the environment's next multi-modal response given the action and internal state
+- **ControllerModel**: processes multi-modal observations and outputs an action
+- **EnvironmentPredictor**: predicts the next multi-modal observation given the action and controller state
 
 Let $a_t$ be the action, $\hat{o}_{t+1}$ the predicted observation, and $o_{t+1}$ the true observation.
 
-**Prediction divergence loss**:  
+**Prediction divergence loss**:
 $\mathcal{L}_\text{div} = D(\hat{o}_{t+1}, o_{t+1})$
 
-Total loss is a weighted sum:  
+Total loss is a weighted sum:
 $\mathcal{L} = \mathcal{L}_\text{div} + \alpha \cdot \mathcal{L}_\text{action} + \beta \cdot \mathcal{L}_\text{EWC}$
+
+### Asynchronous Observation Handling
+
+We introduce a delayed-observation wrapper that returns both delayed and actual observations. The controller can consume a blended input:
+
+$\tilde{o}_t = (1 - \gamma) \cdot o^{\text{delayed}}_t + \gamma \cdot \hat{o}_t$
+
+where $\hat{o}_t$ is the predictor estimate produced from the previous action and state. This allows the controller to act under stale feedback while still grounding updates in the actual observation when it arrives.
 
 ## 3. Continual Learning Loop
 
 For each task:
-1. Observe multi-modal inputs
-2. CrossModalModel outputs action
-3. Environment returns new observation
-4. EnvironmentPredictor predicts response
+1. Receive delayed observation (or prediction when delay is active)
+2. Controller outputs action
+3. Environment returns actual response (possibly later)
+4. Predictor forecasts response from action + state
 5. Minimize divergence + EWC to preserve past knowledge
 
 EWC constrains parameter drift by penalizing deviation from previous task optima.
 
 ## 4. Experiments
 
-The demo executes a 3-task continual learning cycle and logs:
+The demo executes a multi-task continual learning cycle and logs:
 - Per-task average loss
 - Per-task average reward
 - Parameter divergence across tasks
 
-A summary plot (continual_learning_summary.png) visualizes these metrics. The run demonstrates stable divergence and adaptation without external labels.
+Outputs are saved under v2/outputs/.
 
 ## 5. Related Work
 
@@ -51,8 +59,6 @@ A summary plot (continual_learning_summary.png) visualizes these metrics. The ru
 - **Predictive coding**: Learning via prediction error signals
 - **World models**: Learning environment dynamics for control
 - **Self-supervised RL**: Intrinsic signals without labels
-
-Our approach combines predictive learning with EWC in a unified feedback loop.
 
 ## 6. Limitations
 
@@ -69,7 +75,8 @@ Our approach combines predictive learning with EWC in a unified feedback loop.
 
 ## 8. Conclusion
 
-We present a self-supervised continual learning framework that trains solely on prediction divergence between expected and observed environment responses. By integrating an environment predictor with EWC regularization, the system adapts across tasks while mitigating forgetting.
+We present a self-supervised continual learning framework that trains on prediction divergence between expected and observed environment responses while explicitly handling asynchronous observations. By integrating a delayed-observation wrapper and a predictor with EWC regularization, the system adapts across tasks while mitigating forgetting.
 
-**Code**: github.com/gnostrich/continual-learning  
-**Demo outputs**: continual_learning_summary.png
+## V1 Note
+
+The original paper and implementation are archived under v1/. The v2 changes focus on explicit asynchronicity handling, blended observations for the controller, and updated validation/output paths.
